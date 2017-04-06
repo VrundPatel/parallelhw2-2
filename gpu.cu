@@ -14,7 +14,8 @@ double sizeOfBin;
 int binNumber
 
 //  benchmarking program
-__device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor) {
+__device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor) 
+{
   double dx = neighbor.x - particle.x;
   double dy = neighbor.y - particle.y;
   double r2 = dx * dx + dy * dy;

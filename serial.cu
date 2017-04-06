@@ -4,9 +4,7 @@
 #include <math.h>
 #include "common.h"
 
-//
 //  benchmarking program
-//
 int main(int argc, char **argv) {    
     if(find_option(argc, argv, "-h") >= 0) {
         printf( "Options:\n" );
