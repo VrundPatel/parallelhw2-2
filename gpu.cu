@@ -6,12 +6,14 @@
 #include "common.h"
 
 #define NUM_THREADS 256
+#define CUT_OFF_SCALE 4
 
 extern double size;
-//
-//  benchmarking program
-//
 
+double sizeOfBin;
+int binNumber
+
+//  benchmarking program
 __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor) {
   double dx = neighbor.x - particle.x;
   double dy = neighbor.y - particle.y;
@@ -21,9 +23,7 @@ __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor) {
   r2 = (r2 > min_r*min_r) ? r2 : min_r*min_r;
   double r = sqrt( r2 );
 
-  //
   //  very simple short-range repulsive force
-  //
   double coef = ( 1 - cutoff / r ) / r2 / mass;
   particle.ax += coef * dx;
   particle.ay += coef * dy;
