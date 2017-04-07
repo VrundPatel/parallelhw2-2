@@ -18,7 +18,7 @@ __constant__ const int boxesArray[9][2] = {
     {0,1},
     {-1,1},
     {-1,0},
-}
+};
 
 extern double size;
 
