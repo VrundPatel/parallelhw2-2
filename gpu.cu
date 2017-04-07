@@ -8,10 +8,23 @@
 #define NUM_THREADS 256
 #define CUT_OFF_SCALE 4
 
+__constant__ const int boxesArray[9][2] = {
+    {0,0},
+    {-1,1},
+    {0,-1},
+    {1,-1},
+    {1,0},
+    {1,1},
+    {0,1},
+    {-1,1},
+    {-1,0},
+}
+
 extern double size;
 
 double sizeOfBin;
 int binNumber
+
 
 //  benchmarking program
 __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor) 
@@ -31,47 +44,84 @@ __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor)
 
 }
 
-__global__ void compute_forces_gpu(particle_t * particles, int n) {
+__global__ void compute_forces_gpu(particle_t * particles, int n, int* count, double sizeOfBin, int binNumber) 
+{
   // Get thread (particle) ID
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= n) return;
+   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+   int offset = gridDim.x * blockDim.x;
 
-  particles[tid].ax = particles[tid].ay = 0;
-  for(int j = 0 ; j < n ; j++) {
-      apply_force_gpu(particles[tid], particles[j]);
-  }
+   for(int ii = tid; ii < n; ii += offset) {
+       particle_t p = particles[ii];
+       p.ax = p.ay = 0;
+       int i = int(p.x / sizeOfBin);
+       int j = int(p.y / sizeOfBin);
+       for(int t = 0; t < 9; t++) {
+           int row = i + boxesArray[t][0];
+           int col = j + boxesArray[t][1];
+           if (row >= 0 && row < binNumber && col >= 0 && col < binNumber) {
+               int id = row * binNumber + col;
+               int start = count[id-1],end = count[id];
+               for (int k = start; k < end; k++) {
+                   apply_force_gpu(p, particles[k]);
+               }
+            }
+        }
+        particles[ii].ax = p.ax;
+        particles[ii].ay = p.ay;
+    }
 
 }
 
 __global__ void move_gpu (particle_t * particles, int n, double size) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if(tid >= n) return;
+    int offset = gridDim.x * blockDim.x;
 
-    particle_t * p = &particles[tid];
-    //
-    //  slightly simplified Velocity Verlet integration
-    //  conserves energy better than explicit Euler method
-    //
-    p->vx += p->ax * dt;
-    p->vy += p->ay * dt;
-    p->x  += p->vx * dt;
-    p->y  += p->vy * dt;
+    for (int i = tid; i < n; i += offset) {
+        particle_t * p = &particles[i];
+        //
+        //  slightly simplified Velocity Verlet integration
+        //  conserves energy better than explicit Euler method
+        //
+        p->vx += p->ax * dt;
+        p->vy += p->ay * dt;
+        p->x  += p->vx * dt;
+        p->y  += p->vy * dt;
 
-    //
-    //  bounce from walls
-    //
-    while( p->x < 0 || p->x > size ) {
-        p->x  = p->x < 0 ? -(p->x) : 2*size-p->x;
-        p->vx = -(p->vx);
+        //
+        //  bounce from walls
+        //
+        while( p->x < 0 || p->x > size ) {
+            p->x  = p->x < 0 ? -(p->x) : 2*size-p->x;
+            p->vx = -(p->vx);
+        }
+        while( p->y < 0 || p->y > size ) {
+            p->y  = p->y < 0 ? -(p->y) : 2*size-p->y;
+            p->vy = -(p->vy);
+        }
     }
-    while( p->y < 0 || p->y > size ) {
-        p->y  = p->y < 0 ? -(p->y) : 2*size-p->y;
-        p->vy = -(p->vy);
-    }
-
 }
 
+__global__ void createBins( particle_t* particles, particle_t* temp, int* count, int n, double sizeOfBin, int bin) {
+    int threadID = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = gridDim.x * blockDim.x;
+    for (int i = threadID; i < n; i += offset) {
+        int row = int(particles[i].x / sizeOfBin);
+        int col = int(particles[i].y / sizeOfBin);
+        int id = atomicSub(count + x * bin + y, 1);
+        temp[threadID-1] = particles[i];
+    }
+}
+
+__global__ void counts(particle_t* particles, int* count,int n,double sizeOfBin,int bin) {
+    int threadID = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = gridDim.x * blockDim.x;
+    for (int i = threadID; i < n; i += offset) {
+        int row = int(particles[i].x / sizeOfBin);
+        int col = int(particles[i].y / sizeOfBin);
+        atomicAdd(count + x * bin + y,1);
+    }
+}
 
 
 int main( int argc, char **argv) {
@@ -96,8 +146,18 @@ int main( int argc, char **argv) {
     // GPU particle data structure
     particle_t * d_particles;
     cudaMalloc((void **) &d_particles, n * sizeof(particle_t));
+    cudaMalloc((void **) &temp, n * sizeof(particle_t));
 
     set_size(n);
+    sizeOfBin = cutoff * CUT_OFF_SCALE;
+    binNumber = int(size / sizeOfBin) + 1;
+    printf("Number of bins created ==> %d%d", binID, binID);
+
+    int* count;
+    cudaMalloc((void **) &count, (binID*binID+1) * sizeof(int));
+    cudaMemset(count,0,(binNumber * binNumber + 1) * sizeof(int));
+    count = count + 1;
+    int* countAlloc = (int*) malloc(binNumber * binNumber * sizeof(int));
 
     init_particles(n, particles);
 
@@ -120,8 +180,24 @@ int main( int argc, char **argv) {
         //
         //  compute forces
         //
-        int blks = (n + NUM_THREADS - 1) / NUM_THREADS;
-        compute_forces_gpu <<< blks, NUM_THREADS >>> (d_particles, n);
+        int numOfThreads = NUM_THREADS;
+        int blks = min(1024, (n + NUM_THREADS - 1) / NUM_THREADS);
+        int block = blks;
+
+        cudaMemset(count, 0, binNumber * binNumber * sizeof(int));
+        counts<<<block,numOfThreads>>(d_particles, count, n, sizeOfBin, bin);
+
+        cudaMemcpy(count, cnt, binNumber * binNumber * sizeof(int), cudaMemcpyDeviceToHost);
+        for(int i = 1; i < binNumber * binNumber; i++) {
+            countAlloc[i] += countAlloc[i-1];
+        }
+        cudaMemcpy(count, countAlloc, binNumber * binNumber * sizeof(int), cudaMemcpyHostToDevice);
+        createBins<<<block,numOfThreads>>>(d_particles,tmp,count,n,sizeOfBin,binNumber);
+        std::swap(d_particles,temp);
+        cudaMemcpy(count, countAlloc, binNumber * binNumber * sizeof(int), cudaMemcpyHostToDevice);
+
+
+        compute_forces_gpu <<< blks, NUM_THREADS >>> (d_particles, n, count, sizeOfBin, bin);
 
         //
         //  move particles
