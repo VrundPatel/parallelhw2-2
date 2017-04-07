@@ -49,8 +49,8 @@ __global__ void compute_forces_gpu(particle_t * particles, int n, int* count, do
   // Get thread (particle) ID
    int tid = threadIdx.x + blockIdx.x * blockDim.x;
    int offset = gridDim.x * blockDim.x;
-
-   for(int ii = tid; ii < n; ii += offset) {
+   int ii = 0;
+   for(ii = tid; ii < n; ii += offset) {
        particle_t p = particles[ii];
        p.ax = p.ay = 0;
        int i = int(p.x / sizeOfBin);
@@ -76,8 +76,8 @@ __global__ void move_gpu (particle_t * particles, int n, double size) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     int offset = gridDim.x * blockDim.x;
-
-    for (int i = tid; i < n; i += offset) {
+    int i = 0;
+    for (i = tid; i < n; i += offset) {
         particle_t * p = &particles[i];
         //
         //  slightly simplified Velocity Verlet integration
@@ -105,7 +105,8 @@ __global__ void move_gpu (particle_t * particles, int n, double size) {
 __global__ void createBins( particle_t* particles, particle_t* temp, int* count, int n, double sizeOfBin, int bin) {
     int threadID = threadIdx.x + blockIdx.x * blockDim.x;
     int offset = gridDim.x * blockDim.x;
-    for (int i = threadID; i < n; i += offset) {
+    int i = 0;
+    for (i = threadID; i < n; i += offset) {
         int row = int(particles[i].x / sizeOfBin);
         int col = int(particles[i].y / sizeOfBin);
         int id = atomicSub(count + x * bin + y, 1);
@@ -116,7 +117,8 @@ __global__ void createBins( particle_t* particles, particle_t* temp, int* count,
 __global__ void counts(particle_t* particles, int* count,int n,double sizeOfBin,int bin) {
     int threadID = threadIdx.x + blockIdx.x * blockDim.x;
     int offset = gridDim.x * blockDim.x;
-    for (int i = threadID; i < n; i += offset) {
+    int i = 0;
+    for (i = threadID; i < n; i += offset) {
         int row = int(particles[i].x / sizeOfBin);
         int col = int(particles[i].y / sizeOfBin);
         atomicAdd(count + x * bin + y,1);
